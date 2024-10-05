@@ -10,6 +10,7 @@ import SwiftUI
 import LoopKit
 import LoopKitUI
 import MockKit
+import LoopAlgorithm
 
 struct MockPumpManagerSettingsView: View {
     fileprivate enum PresentedAlert {
@@ -59,6 +60,7 @@ struct MockPumpManagerSettingsView: View {
         Section {
             VStack(spacing: 8) {
                 pumpProgressView
+                    .accessibilityIdentifier("mockPumpManagerProgressView")
                     .openMockPumpSettingsOnLongPress(enabled: true, pumpManager: viewModel.pumpManager, supportedInsulinTypes: supportedInsulinTypes)
                 Divider()
                 insulinInfo

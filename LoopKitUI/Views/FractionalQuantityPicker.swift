@@ -9,6 +9,7 @@
 import SwiftUI
 import HealthKit
 import LoopKit
+import LoopAlgorithm
 
 
 /// Enables selecting the whole and fractional parts of an HKQuantity value in independent pickers.
@@ -69,7 +70,7 @@ public struct FractionalQuantityPicker: View {
                 let newFractionValue = Self.matchingFraction(for: doubleValue.wrappedValue.fraction, from: fractionalValuesByWhole[newWholeValue] ?? [0.0])
                 let newDoubleValue = newWholeValue + newFractionValue
                 let maxValue = guardrail.absoluteBounds.upperBound.doubleValue(for: unit)
-                doubleValue.wrappedValue = min(newDoubleValue, maxValue)
+                doubleValue.wrappedValue = unit.roundForPicker(value: min(newDoubleValue, maxValue))
             }
         )
         self._fraction = Binding(
@@ -77,7 +78,7 @@ public struct FractionalQuantityPicker: View {
             set: { newFractionValue in
                 let newDoubleValue = doubleValue.wrappedValue.whole + newFractionValue
                 let minValue = guardrail.absoluteBounds.lowerBound.doubleValue(for: unit)
-                doubleValue.wrappedValue = max(newDoubleValue, minValue)
+                doubleValue.wrappedValue = unit.roundForPicker(value: max(newDoubleValue, minValue))
             }
         )
         self.unit = unit
@@ -123,6 +124,7 @@ public struct FractionalQuantityPicker: View {
             .frame(width: availableWidth / 3)
             .overlay(
                 Text(separator)
+                    .font(.title)
                     .foregroundColor(Color(.secondaryLabel))
                     .offset(x: spacing + separatorWidth),
                 alignment: .trailing
@@ -177,7 +179,7 @@ public struct FractionalQuantityPicker: View {
     var separatorWidth: CGFloat {
         let attributedSeparator = NSAttributedString(
             string: separator,
-            attributes: [.font: UIFont.preferredFont(forTextStyle: .body)]
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .title1)]
         )
 
         return attributedSeparator.size().width

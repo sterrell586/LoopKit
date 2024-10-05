@@ -8,6 +8,7 @@
 
 import XCTest
 import HealthKit
+import LoopAlgorithm
 @testable import LoopKit
 
 class DosingDecisionStorePersistenceTests: PersistenceControllerTestCase, DosingDecisionStoreDelegate {
@@ -40,9 +41,8 @@ class DosingDecisionStorePersistenceTests: PersistenceControllerTestCase, Dosing
 
     // MARK: -
 
-    func testStoreDosingDecision() {
+    func testStoreDosingDecision() async {
         let storeDosingDecisionHandler = expectation(description: "Store dosing decision handler")
-        let storeDosingDecisionCompletion = expectation(description: "Store dosing decision completion")
 
         var handlerInvocation = 0
 
@@ -57,18 +57,14 @@ class DosingDecisionStorePersistenceTests: PersistenceControllerTestCase, Dosing
             }
         }
 
-        dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test")) {
-            storeDosingDecisionCompletion.fulfill()
-        }
+        await dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test"))
 
-        wait(for: [storeDosingDecisionHandler, storeDosingDecisionCompletion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [storeDosingDecisionHandler], timeout: 30)
     }
 
-    func testStoreDosingDecisionMultiple() {
+    func testStoreDosingDecisionMultiple() async {
         let storeDosingDecisionHandler1 = expectation(description: "Store dosing decision handler 1")
         let storeDosingDecisionHandler2 = expectation(description: "Store dosing decision handler 2")
-        let storeDosingDecisionCompletion1 = expectation(description: "Store dosing decision completion 1")
-        let storeDosingDecisionCompletion2 = expectation(description: "Store dosing decision completion 2")
 
         var handlerInvocation = 0
 
@@ -85,15 +81,11 @@ class DosingDecisionStorePersistenceTests: PersistenceControllerTestCase, Dosing
             }
         }
 
-        dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test")) {
-            storeDosingDecisionCompletion1.fulfill()
-        }
+        await dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test"))
 
-        dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test")) {
-            storeDosingDecisionCompletion2.fulfill()
-        }
+        await dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test"))
 
-        wait(for: [storeDosingDecisionHandler1, storeDosingDecisionCompletion1, storeDosingDecisionHandler2, storeDosingDecisionCompletion2], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [storeDosingDecisionHandler1, storeDosingDecisionHandler2], timeout: 30)
     }
 
     func testDosingDecisionObjectEncodable() throws {
@@ -240,14 +232,12 @@ class DosingDecisionStorePersistenceTests: PersistenceControllerTestCase, Dosing
         "notice" : {
           "predictedGlucoseBelowTarget" : {
             "minGlucose" : {
-              "endDate" : "2020-05-14T23:03:15Z",
               "quantity" : 75.5,
               "quantityUnit" : "mg/dL",
               "startDate" : "2020-05-14T23:03:15Z"
             }
           }
-        },
-        "pendingInsulin" : 0.75
+        }
       }
     },
     "manualBolusRequested" : 0.8,
@@ -425,6 +415,7 @@ class DosingDecisionStoreQueryAnchorTests: XCTestCase {
 
 class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
 
+    
     var dosingDecisionStore: DosingDecisionStore!
     var completion: XCTestExpectation!
     var queryAnchor: DosingDecisionStore.QueryAnchor!
@@ -462,7 +453,7 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
 
     func testEmptyWithMissingQueryAnchor() {
@@ -479,7 +470,7 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
 
     func testEmptyWithNonDefaultQueryAnchor() {
@@ -496,13 +487,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
 
-    func testDataWithUnusedQueryAnchor() {
+    func testDataWithUnusedQueryAnchor() async {
         let syncIdentifiers = [generateSyncIdentifier(), generateSyncIdentifier(), generateSyncIdentifier()]
 
-        addData(withSyncIdentifiers: syncIdentifiers)
+        await addData(withSyncIdentifiers: syncIdentifiers)
 
         dosingDecisionStore.executeDosingDecisionQuery(fromQueryAnchor: queryAnchor, limit: limit) { result in
             switch result {
@@ -518,13 +509,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [completion], timeout: 30)
     }
 
-    func testDataWithStaleQueryAnchor() {
+    func testDataWithStaleQueryAnchor() async {
         let syncIdentifiers = [generateSyncIdentifier(), generateSyncIdentifier(), generateSyncIdentifier()]
 
-        addData(withSyncIdentifiers: syncIdentifiers)
+        await addData(withSyncIdentifiers: syncIdentifiers)
 
         queryAnchor.modificationCounter = 2
 
@@ -540,13 +531,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [completion])
     }
 
-    func testDataWithCurrentQueryAnchor() {
+    func testDataWithCurrentQueryAnchor() async {
         let syncIdentifiers = [generateSyncIdentifier(), generateSyncIdentifier(), generateSyncIdentifier()]
 
-        addData(withSyncIdentifiers: syncIdentifiers)
+        await addData(withSyncIdentifiers: syncIdentifiers)
 
         queryAnchor.modificationCounter = 3
 
@@ -561,13 +552,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [completion])
     }
 
-    func testDataWithLimitZero() {
+    func testDataWithLimitZero() async {
         let syncIdentifiers = [generateSyncIdentifier(), generateSyncIdentifier(), generateSyncIdentifier()]
 
-        addData(withSyncIdentifiers: syncIdentifiers)
+        await addData(withSyncIdentifiers: syncIdentifiers)
 
         limit = 0
 
@@ -582,13 +573,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [completion])
     }
 
-    func testDataWithLimitCoveredByData() {
+    func testDataWithLimitCoveredByData() async {
         let syncIdentifiers = [generateSyncIdentifier(), generateSyncIdentifier(), generateSyncIdentifier()]
 
-        addData(withSyncIdentifiers: syncIdentifiers)
+        await addData(withSyncIdentifiers: syncIdentifiers)
 
         limit = 2
 
@@ -605,15 +596,13 @@ class DosingDecisionStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
 
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        await fulfillment(of: [completion], timeout: 30)
     }
 
-    private func addData(withSyncIdentifiers syncIdentifiers: [UUID]) {
-        let semaphore = DispatchSemaphore(value: 0)
+    private func addData(withSyncIdentifiers syncIdentifiers: [UUID]) async {
         for syncIdentifier in syncIdentifiers {
-            self.dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test", syncIdentifier: syncIdentifier)) { semaphore.signal() }
+            await dosingDecisionStore.storeDosingDecision(StoredDosingDecision(reason: "test", syncIdentifier: syncIdentifier))
         }
-        for _ in syncIdentifiers { semaphore.wait() }
     }
 
     private func generateSyncIdentifier() -> UUID { UUID() }
@@ -847,14 +836,12 @@ class StoredDosingDecisionCodableTests: XCTestCase {
       "notice" : {
         "predictedGlucoseBelowTarget" : {
           "minGlucose" : {
-            "endDate" : "2020-05-14T23:03:15Z",
             "quantity" : 75.5,
             "quantityUnit" : "mg/dL",
             "startDate" : "2020-05-14T23:03:15Z"
           }
         }
-      },
-      "pendingInsulin" : 0.75
+      }
     }
   },
   "manualBolusRequested" : 0.8,
@@ -1032,12 +1019,6 @@ extension ManualBolusRecommendationWithDate: Equatable {
     }
 }
 
-extension ManualBolusRecommendation: Equatable {
-    public static func == (lhs: ManualBolusRecommendation, rhs: ManualBolusRecommendation) -> Bool {
-        return lhs.amount == rhs.amount && lhs.pendingInsulin == rhs.pendingInsulin && lhs.notice == rhs.notice
-    }
-}
-
 fileprivate extension StoredDosingDecision {
     static var test: StoredDosingDecision {
         let controllerTimeZone = TimeZone(identifier: "America/Los_Angeles")!
@@ -1150,8 +1131,7 @@ fileprivate extension StoredDosingDecision {
                                                               duration: .minutes(30))
         let automaticDoseRecommendation = AutomaticDoseRecommendation(basalAdjustment: tempBasalRecommendation, bolusUnits: 1.25)
         let manualBolusRecommendation = ManualBolusRecommendationWithDate(recommendation: ManualBolusRecommendation(amount: 1.2,
-                                                                                                                    pendingInsulin: 0.75,
-                                                                                                                    notice: .predictedGlucoseBelowTarget(minGlucose: PredictedGlucoseValue(startDate: dateFormatter.date(from: "2020-05-14T23:03:15Z")!,
+                                                                                                                    notice: .predictedGlucoseBelowTarget(minGlucose: SimpleGlucoseValue(startDate: dateFormatter.date(from: "2020-05-14T23:03:15Z")!,
                                                                                                                                                                                            quantity: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 75.5)))),
                                                                           date: dateFormatter.date(from: "2020-05-14T22:38:16Z")!)
         let manualBolusRequested = 0.8

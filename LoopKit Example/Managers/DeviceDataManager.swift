@@ -9,7 +9,7 @@
 import Foundation
 import HealthKit
 import LoopKit
-
+import LoopAlgorithm
 
 class DeviceDataManager {
 
@@ -30,9 +30,6 @@ class DeviceDataManager {
             healthKitSampleStore: carbSampleStore,
             cacheStore: cacheStore,
             cacheLength: observationInterval,
-            defaultAbsorptionTimes: (fast: .minutes(30), medium: .hours(3), slow: .hours(5)),
-            carbRatioSchedule: carbRatioSchedule,
-            insulinSensitivitySchedule: insulinSensitivitySchedule,
             provenanceIdentifier: HKSource.default().bundleIdentifier
         )
 
@@ -46,10 +43,7 @@ class DeviceDataManager {
         doseStore = DoseStore(
             healthKitSampleStore: doseSampleStore,
             cacheStore: cacheStore,
-            insulinModelProvider: PresetInsulinModelProvider(defaultRapidActingModel: ExponentialInsulinModelPreset.rapidActingAdult),
             longestEffectDuration: ExponentialInsulinModelPreset.rapidActingAdult.effectDuration,
-            basalProfile: basalRateSchedule,
-            insulinSensitivitySchedule: insulinSensitivitySchedule,
             provenanceIdentifier: HKSource.default().bundleIdentifier
         )
 
@@ -84,25 +78,18 @@ class DeviceDataManager {
     var basalRateSchedule = UserDefaults.standard.basalRateSchedule {
         didSet {
             UserDefaults.standard.basalRateSchedule = basalRateSchedule
-
-            doseStore.basalProfile = basalRateSchedule
         }
     }
 
     var carbRatioSchedule = UserDefaults.standard.carbRatioSchedule {
         didSet {
             UserDefaults.standard.carbRatioSchedule = carbRatioSchedule
-
-            carbStore?.carbRatioSchedule = carbRatioSchedule
         }
     }
 
     var insulinSensitivitySchedule = UserDefaults.standard.insulinSensitivitySchedule {
         didSet {
             UserDefaults.standard.insulinSensitivitySchedule = insulinSensitivitySchedule
-
-            carbStore?.insulinSensitivitySchedule = insulinSensitivitySchedule
-            doseStore.insulinSensitivitySchedule = insulinSensitivitySchedule
         }
     }
 
@@ -129,7 +116,9 @@ class DeviceDataManager {
             UserDefaults.standard.pumpID = pumpID
 
             if pumpID != oldValue {
-                doseStore.resetPumpData()
+                Task {
+                    try await doseStore.resetPumpData()
+                }
             }
         }
     }

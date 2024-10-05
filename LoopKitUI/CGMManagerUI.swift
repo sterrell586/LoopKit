@@ -8,6 +8,7 @@
 import HealthKit
 import SwiftUI
 import LoopKit
+import LoopAlgorithm
 
 public struct CGMManagerDescriptor {
     public let identifier: String
@@ -66,6 +67,7 @@ extension CGMManagerUI {
     }
 }
 
+@MainActor
 public protocol CGMManagerOnboardingDelegate: AnyObject {
     /// Informs the delegate that the specified CGM manager was created.
     ///
@@ -80,6 +82,7 @@ public protocol CGMManagerOnboardingDelegate: AnyObject {
     func cgmManagerOnboarding(didOnboardCGMManager cgmManager: CGMManagerUI)
 }
 
+@MainActor
 public protocol CGMManagerOnboarding {
     /// Delegate to notify about CGM manager onboarding.
     var cgmManagerOnboardingDelegate: CGMManagerOnboardingDelegate? { get set }

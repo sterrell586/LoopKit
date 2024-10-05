@@ -10,6 +10,7 @@ import Foundation
 import CoreData
 import HealthKit
 import os.log
+import LoopAlgorithm
 
 public protocol GlucoseStoreDelegate: AnyObject {
 
@@ -148,7 +149,7 @@ public final class GlucoseStore {
         cacheStore: PersistenceController,
         cacheLength: TimeInterval = 60 /* minutes */ * 60 /* seconds */,
         momentumDataInterval: TimeInterval = GlucoseMath.momentumDataInterval,
-        provenanceIdentifier: String
+        provenanceIdentifier: String = HKSource.default().bundleIdentifier
     ) {
         let cacheLength = max(cacheLength, momentumDataInterval)
 
@@ -342,7 +343,7 @@ extension GlucoseStore {
                 let objects = try self.cacheStore.managedObjectContext.fetch(request)
                 latestGlucose = objects.first.map { StoredGlucoseSample(managedObject: $0) }
             } catch let error {
-                self.log.error("Unable to fetch latest glucose object: %@", String(describing: error))
+                self.log.error("Unable to fetch latest glucose object: %{public}@", String(describing: error))
             }
 
             self.latestGlucose = latestGlucose
@@ -423,7 +424,16 @@ extension GlucoseStore {
             completion(.success(storedSamples))
         }
     }
-    
+
+    public func addGlucoseSamples(_ samples: [NewGlucoseSample]) async throws -> [StoredGlucoseSample] {
+        try await withCheckedThrowingContinuation { continuation in
+            addGlucoseSamples(samples) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+
     private func saveSamplesToHealthKit() {
         dispatchPrecondition(condition: .onQueue(queue))
         var error: Error?
@@ -533,7 +543,7 @@ extension GlucoseStore {
                     let samples = objects.map { StoredGlucoseSample(managedObject: $0) }
                     completion(.success(samples.first))
                 } catch let error {
-                    self.log.error("Error in getLatestCGMGlucose: %@", String(describing: error))
+                    self.log.error("Error in getLatestCGMGlucose: %{public}@", String(describing: error))
                     completion(.failure(error))
                 }
             }
@@ -700,61 +710,6 @@ extension GlucoseStore {
 
         NotificationCenter.default.post(name: GlucoseStore.glucoseSamplesDidChange, object: self)
         delegate?.glucoseStoreHasUpdatedGlucoseData(self)
-    }
-}
-
-// MARK: - Math
-
-extension GlucoseStore {
-    /// Calculates the momentum effect for recent glucose values.
-    ///
-    /// The duration of effect data returned is determined by the `momentumDataInterval`, and the delta between data points is 5 minutes.
-    ///
-    /// This operation is performed asynchronously and the completion will be executed on an arbitrary background queue.
-    ///
-    /// - Parameters:
-    ///   - date: A Date object representing the end of the momentumDataInterval used to fetch glucose samples for calculating momentum.  If nil, the current date is used.
-    ///   - completion: A closure called once the calculation has completed.
-    ///   - result: The calculated effect values, or an empty array if the glucose data isn't suitable for momentum calculation, or error.
-    public func getRecentMomentumEffect(for date: Date? = nil, _ completion: @escaping (_ result: Result<[GlucoseEffect], Error>) -> Void) {
-
-        getGlucoseSamples(start: (date ?? Date()).addingTimeInterval(-momentumDataInterval)) { (result) in
-            switch result {
-            case .failure(let error):
-                completion(.failure(error))
-            case .success(let samples):
-                let effects = samples.linearMomentumEffect()
-                completion(.success(effects))
-            }
-        }
-    }
-
-    /// Calculates a timeline of effect velocity (glucose/time) observed in glucose that counteract the specified effects.
-    ///
-    /// - Parameters:
-    ///   - start: The earliest date of glucose samples to include.
-    ///   - end: The latest date of glucose samples to include, if provided.
-    ///   - effects: Glucose effects to be countered, in chronological order, and counteraction effects calculated.
-    ///   - completion: A closure called once the glucose samples have been retrieved and counteraction effects calculated.
-    ///   - result: An array of glucose effect velocities describing the change in glucose samples compared to the specified glucose effects, or error.
-    public func getCounteractionEffects(start: Date, end: Date? = nil, to effects: [GlucoseEffect], _ completion: @escaping (_ result: Result<[GlucoseEffectVelocity], Error>) -> Void) {
-        getGlucoseSamples(start: start, end: end) { (result) in
-            switch result {
-            case .failure(let error):
-                completion(.failure(error))
-            case .success(let samples):
-                completion(.success(self.counteractionEffects(for: samples, to: effects)))
-            }
-        }
-    }
-
-    /// Calculates a timeline of effect velocity (glucose/time) observed in glucose that counteract the specified effects.
-    ///
-    /// - Parameter:
-    ///   - samples: The observed timeline of samples.
-    ///   - effects: An array of velocities describing the change in glucose samples compared to the specified effects
-    public func counteractionEffects<Sample: GlucoseSampleValue>(for samples: [Sample], to effects: [GlucoseEffect]) -> [GlucoseEffectVelocity] {
-        samples.counteractionEffects(to: effects)
     }
 }
 
@@ -947,32 +902,34 @@ extension GlucoseStore {
     /// This operation is performed asynchronously and the completion will be executed on an arbitrary background queue.
     ///
     /// - parameter completionHandler: A closure called once the report has been generated. The closure takes a single argument of the report string.
-    public func generateDiagnosticReport(_ completionHandler: @escaping (_ report: String) -> Void) {
-        queue.async {
-            var report: [String] = [
-                "## GlucoseStore",
-                "",
-                "* latestGlucoseValue: \(String(reflecting: self.latestGlucose))",
-                "* managedDataInterval: \(self.managedDataInterval ?? 0)",
-                "* cacheLength: \(self.cacheLength)",
-                "* momentumDataInterval: \(self.momentumDataInterval)",
-                "* HealthKitSampleStore: \(self.hkSampleStore?.debugDescription ?? "nil")",
-                "",
-                "### cachedGlucoseSamples",
-            ]
+    public func generateDiagnosticReport() async -> String {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                var report: [String] = [
+                    "## GlucoseStore",
+                    "",
+                    "* latestGlucoseValue: \(String(reflecting: self.latestGlucose))",
+                    "* managedDataInterval: \(self.managedDataInterval ?? 0)",
+                    "* cacheLength: \(self.cacheLength)",
+                    "* momentumDataInterval: \(self.momentumDataInterval)",
+                    "* HealthKitSampleStore: \(self.hkSampleStore?.debugDescription ?? "nil")",
+                    "",
+                    "### cachedGlucoseSamples",
+                ]
 
-            switch self.getGlucoseSamples(start: Date(timeIntervalSinceNow: -.hours(24))) {
-            case .failure(let error):
-                report.append("Error: \(error)")
-            case .success(let samples):
-                for sample in samples {
-                    report.append(String(describing: sample))
+                switch self.getGlucoseSamples(start: Date(timeIntervalSinceNow: -.hours(24))) {
+                case .failure(let error):
+                    report.append("Error: \(error)")
+                case .success(let samples):
+                    for sample in samples {
+                        report.append(String(describing: sample))
+                    }
                 }
+
+                report.append("")
+
+                continuation.resume(returning: report.joined(separator: "\n"))
             }
-
-            report.append("")
-
-            completionHandler(report.joined(separator: "\n"))
         }
     }
 }

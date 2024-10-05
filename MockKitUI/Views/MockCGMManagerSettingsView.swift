@@ -62,6 +62,8 @@ struct MockCGMManagerSettingsView: View {
         if (allowDebugFeatures) {
             settingsSubSection
         }
+
+        heartbeatSubSection
     }
     
     private var statusCardSubSection: some View {
@@ -155,8 +157,10 @@ struct MockCGMManagerSettingsView: View {
                     Text(viewModel.lastGlucoseValueFormatted)
                         .font(.title)
                         .fontWeight(.heavy)
-                    Text(viewModel.glucoseUnitString)
-                        .foregroundColor(.secondary)
+                    if viewModel.shouldDisplayUnitsForCurrentGlucose {
+                        Text(viewModel.glucoseUnitString)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         }
@@ -218,6 +222,17 @@ struct MockCGMManagerSettingsView: View {
             }
         }
     }
+
+    private var heartbeatSubSection: some View {
+        Section(header: SectionHeader(label: "BLE Heartbeat")) {
+            if let heartbeatFob = viewModel.cgmManager.heartbeatFob {
+                NavigationLink(destination: HeartbeatFobPairingView(heartbeatFob: heartbeatFob)) {
+                    LabeledValueView(label: "Status", value: viewModel.bleHeartbeatStatus)
+                }
+            }
+        }
+    }
+
 
     private var lastReadingSection: some View {
         Section(header: SectionHeader(label: "Last Reading")) {

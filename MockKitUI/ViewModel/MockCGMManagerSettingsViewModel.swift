@@ -45,7 +45,16 @@ class MockCGMManagerSettingsViewModel: ObservableObject {
     var glucoseUnitString: String {
         displayGlucosePreference.unit.shortLocalizedUnitString()
     }
-    
+
+    var shouldDisplayUnitsForCurrentGlucose: Bool {
+        switch cgmManager.mockSensorState.glucoseRangeCategory {
+        case .aboveRange, .belowRange:
+            return false
+        default:
+            return true
+        }
+    }
+
     @Published private(set) var lastGlucoseDate: Date? {
         didSet {
             updateLastReadingTime()
@@ -53,7 +62,9 @@ class MockCGMManagerSettingsViewModel: ObservableObject {
     }
     
     @Published var lastReadingMinutesFromNow: Int = 0
-    
+
+    @Published var fobId: Int?
+
     func updateLastReadingTime() {
         guard let lastGlucoseDate = lastGlucoseDate else {
             lastReadingMinutesFromNow = 0
@@ -64,6 +75,15 @@ class MockCGMManagerSettingsViewModel: ObservableObject {
     
     @Published private(set) var lastGlucoseTrend: GlucoseTrend?
     
+
+    var bleHeartbeatStatus: String? {
+        if let fobId {
+            return "Fob ID #\(fobId)"
+        } else {
+            return "Not Paired"
+        }
+    }
+
     var lastGlucoseDateFormatted: String? {
         guard let lastGlucoseDate = lastGlucoseDate else {
             return nil
@@ -76,11 +96,13 @@ class MockCGMManagerSettingsViewModel: ObservableObject {
     init(cgmManager: MockCGMManager, displayGlucosePreference: DisplayGlucosePreference) {
         self.cgmManager = cgmManager
         self.displayGlucosePreference = displayGlucosePreference
-                
+
+        self.fobId = cgmManager.mockSensorState.heartbeatFobId
+
         lastGlucoseDate = cgmManager.cgmManagerStatus.lastCommunicationDate
         lastGlucoseTrend = cgmManager.mockSensorState.trendType
         setLastGlucoseTrend(cgmManager.mockSensorState.trendRate)
-        setLastGlucoseValue(cgmManager.mockSensorState.currentGlucose)
+        setLastGlucoseValue()
         
         cgmManager.addStatusObserver(self, queue: .main)
     }
@@ -90,19 +112,30 @@ class MockCGMManagerSettingsViewModel: ObservableObject {
             lastGlucoseTrendFormatted = nil
             return
         }
-        let glucoseUnitPerMinute = displayGlucosePreference.unit.unitDivided(by: .minute())
         lastGlucoseTrendFormatted = displayGlucosePreference.formatMinuteRate(trendRate)
     }
     
-    func setLastGlucoseValue(_ lastGlucose: HKQuantity?) {
-        guard let lastGlucose = lastGlucose else {
+    func setLastGlucoseValue() {
+        guard let lastGlucose = cgmManager.mockSensorState.currentGlucose else {
             lastGlucoseValueWithUnitFormatted = nil
             lastGlucoseValueFormatted = "---"
             return
         }
 
-        lastGlucoseValueWithUnitFormatted = displayGlucosePreference.format(lastGlucose)
-        lastGlucoseValueFormatted = displayGlucosePreference.format(lastGlucose, includeUnit: false)
+        switch cgmManager.mockSensorState.glucoseRangeCategory {
+        case .aboveRange:
+            let glucoseString = LocalizedString("HIGH", comment: "String displayed instead of a glucose value above the CGM range")
+            lastGlucoseValueWithUnitFormatted = glucoseString
+            lastGlucoseValueFormatted = glucoseString
+        case .belowRange:
+            let glucoseString = LocalizedString("LOW", comment: "String displayed instead of a glucose value below the CGM range")
+            lastGlucoseValueWithUnitFormatted = glucoseString
+            lastGlucoseValueFormatted = glucoseString
+        default:
+            lastGlucoseValueWithUnitFormatted = displayGlucosePreference.format(lastGlucose)
+            lastGlucoseValueFormatted = displayGlucosePreference.format(lastGlucose, includeUnit: false)
+        }
+
     }
 }
 
@@ -113,7 +146,9 @@ extension MockCGMManagerSettingsViewModel: CGMManagerStatusObserver {
         lastGlucoseTrend = cgmManager.mockSensorState.trendType
         
         setLastGlucoseTrend(cgmManager.mockSensorState.trendRate)
-        
-        setLastGlucoseValue(cgmManager.mockSensorState.currentGlucose)
+
+        fobId = cgmManager.mockSensorState.heartbeatFobId
+
+        setLastGlucoseValue()
     }
 }

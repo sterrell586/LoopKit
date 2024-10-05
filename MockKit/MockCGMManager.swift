@@ -11,6 +11,7 @@ import LoopKit
 import LoopKitUI // TODO: DeviceStatusBadge references should live in MockKitUI
 import LoopTestingKit
 import UIKit
+import LoopAlgorithm
 
 public struct MockCGMState: GlucoseDisplayable {
     public var isStateValid: Bool
@@ -33,8 +34,12 @@ public struct MockCGMState: GlucoseDisplayable {
 
     public var samplesShouldBeUploaded: Bool
 
+    public var heartbeatFobId: Int?
+    public var heartbeatFobPeripheralIdentifier: UUID?
+
     private var cgmLowerLimitValue: Double
-       
+
+
     // HKQuantity isn't codable
     public var cgmLowerLimit: HKQuantity {
         get {
@@ -299,10 +304,14 @@ extension MockCGMLifecycleProgress: RawRepresentable {
 }
 
 public final class MockCGMManager: TestingCGMManager {    
-    public static let pluginIdentifier: String = "MockCGMManager"
+    public static let managerIdentifier: String = "MockCGMManager"
+    
+    public var pluginIdentifier: String { Self.managerIdentifier }
 
     public static let localizedTitle = "CGM Simulator"
     
+    public var autoStartTrace: Bool = true
+
     public var localizedTitle: String {
         return MockCGMManager.localizedTitle
     }
@@ -342,7 +351,7 @@ public final class MockCGMManager: TestingCGMManager {
             lockedMockSensorState.value
         }
         set {
-            lockedMockSensorState.mutate { $0 = newValue }
+            let _ = lockedMockSensorState.mutate { $0 = newValue }
             self.notifyStatusObservers(cgmManagerStatus: self.cgmManagerStatus)
         }
     }
@@ -391,15 +400,21 @@ public final class MockCGMManager: TestingCGMManager {
             lockedDataSource.value
         }
         set {
-            lockedDataSource.mutate { $0 = newValue }
+            let _ = lockedDataSource.mutate { $0 = newValue }
             self.notifyStatusObservers(cgmManagerStatus: self.cgmManagerStatus)
         }
     }
 
+    public var heartbeatFob: HeartbeatFob?
+
     private var glucoseUpdateTimer: Timer?
 
     public init() {
-        setupGlucoseUpdateTimer()
+        Task { @MainActor in
+            self.heartbeatFob = HeartbeatFob(fobId: nil, peripheralIdentifier: nil)
+            self.heartbeatFob?.delegate = self
+        }
+        setupGlucoseUpdateTrigger()
     }
 
     // MARK: Handling CGM Manager Status observers
@@ -425,11 +440,13 @@ public final class MockCGMManager: TestingCGMManager {
     }
     
     public init?(rawState: RawStateValue) {
+
         if let mockSensorStateRawValue = rawState["mockSensorState"] as? MockCGMState.RawValue,
             let mockSensorState = MockCGMState(rawValue: mockSensorStateRawValue) {
             self.lockedMockSensorState.value = mockSensorState
         } else {
-            self.lockedMockSensorState.value = MockCGMState(isStateValid: true)
+            let newState = MockCGMState(isStateValid: true)
+            self.lockedMockSensorState.value = newState
         }
 
         if let dataSourceRawValue = rawState["dataSource"] as? MockCGMDataSource.RawValue,
@@ -439,7 +456,9 @@ public final class MockCGMManager: TestingCGMManager {
             self.lockedDataSource.value = MockCGMDataSource(model: .sineCurve(parameters: (baseGlucose: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 110), amplitude: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 20), period: TimeInterval(hours: 6), referenceDate: Date())))
         }
 
-        setupGlucoseUpdateTimer()
+        setupHeartbeatFob()
+
+        setupGlucoseUpdateTrigger()
     }
 
     deinit {
@@ -451,6 +470,17 @@ public final class MockCGMManager: TestingCGMManager {
             "mockSensorState": mockSensorState.rawValue,
             "dataSource": dataSource.rawValue
         ]
+    }
+
+    public func setupHeartbeatFob() {
+        Task { @MainActor in
+            let fob = HeartbeatFob(
+                fobId: self.mockSensorState.heartbeatFobId,
+                peripheralIdentifier: mockSensorState.heartbeatFobPeripheralIdentifier
+            )
+            fob.delegate = self
+            self.heartbeatFob = fob
+        }
     }
 
     public let isOnboarded = true   // No distinction between created and onboarded
@@ -483,23 +513,46 @@ public final class MockCGMManager: TestingCGMManager {
     }
 
     private func sendCGMReadingResult(_ result: CGMReadingResult) {
-        if case .newData(let samples) = result,
-            let currentValue = samples.first
-        {
-            mockSensorState.currentGlucose = currentValue.quantity
-            mockSensorState.trendType = currentValue.trend
-            mockSensorState.trendRate = currentValue.trendRate
-            mockSensorState.glucoseRangeCategory = glucoseRangeCategory(for: currentValue.quantitySample)
-            issueAlert(for: currentValue)
-        }
-        self.delegate.notify { delegate in
-            delegate?.cgmManager(self, hasNew: result)
+        if case .newData(let samples) = result {
+            if let currentValue = samples.first {
+                mockSensorState.currentGlucose = currentValue.quantity
+                mockSensorState.trendType = currentValue.trend
+                mockSensorState.trendRate = currentValue.trendRate
+                mockSensorState.glucoseRangeCategory = glucoseRangeCategory(for: currentValue.quantitySample)
+                issueAlert(for: currentValue)
+            }
+
+            let samplesWithCondition = samples.map { sample in
+                var condition: GlucoseCondition?
+                if sample.quantity < mockSensorState.cgmLowerLimit {
+                    condition = .belowRange
+                } else if sample.quantity > mockSensorState.cgmUpperLimit {
+                    condition = .aboveRange
+                }
+                return NewGlucoseSample(
+                    date: sample.date,
+                    quantity: sample.quantity,
+                    condition: condition,
+                    trend: sample.trend,
+                    trendRate: sample.trendRate,
+                    isDisplayOnly: sample.isDisplayOnly,
+                    wasUserEntered: sample.wasUserEntered,
+                    syncIdentifier: sample.syncIdentifier
+                )
+            }
+            self.delegate.notify { delegate in
+                delegate?.cgmManager(self, hasNew: .newData(samplesWithCondition))
+            }
+        } else {
+            self.delegate.notify { delegate in
+                delegate?.cgmManager(self, hasNew: result)
+            }
         }
     }
     
     public func glucoseRangeCategory(for glucose: GlucoseSampleValue) -> GlucoseRangeCategory? {
         switch glucose.quantity {
-        case ...mockSensorState.cgmLowerLimit:
+        case ..<mockSensorState.cgmLowerLimit:
             return glucose.wasUserEntered ? .urgentLow : .belowRange
         case mockSensorState.cgmLowerLimit..<mockSensorState.urgentLowGlucoseThreshold:
             return .urgentLow
@@ -507,7 +560,7 @@ public final class MockCGMManager: TestingCGMManager {
             return .low
         case mockSensorState.lowGlucoseThreshold..<mockSensorState.highGlucoseThreshold:
             return .normal
-        case mockSensorState.highGlucoseThreshold..<mockSensorState.cgmUpperLimit:
+        case mockSensorState.highGlucoseThreshold...mockSensorState.cgmUpperLimit:
             return .high
         default:
             return glucose.wasUserEntered ? .high : .aboveRange
@@ -555,10 +608,10 @@ public final class MockCGMManager: TestingCGMManager {
     
     public func updateGlucoseUpdateTimer() {
         glucoseUpdateTimer?.invalidate()
-        setupGlucoseUpdateTimer()
+        setupGlucoseUpdateTrigger()
     }
     
-    private func setupGlucoseUpdateTimer() {
+    private func setupGlucoseUpdateTrigger() {
         glucoseUpdateTimer = Timer.scheduledTimer(withTimeInterval: dataSource.dataPointFrequency.frequency, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.fetchNewDataIfNeeded() { result in
@@ -792,7 +845,13 @@ extension MockCGMState: RawRepresentable {
         self.highGlucoseThresholdValue = highGlucoseThresholdValue
         self.cgmLowerLimitValue = cgmLowerLimitValue
         self.cgmUpperLimitValue = cgmUpperLimitValue
-        
+
+        self.heartbeatFobId = rawValue["heartbeatFobId"] as? Int
+
+        if let rawHeartbeatFobPeripheralIdentifier = rawValue["heartbeatFobIdPeripheralIdentifier"] as? String {
+            self.heartbeatFobPeripheralIdentifier = UUID(uuidString: rawHeartbeatFobPeripheralIdentifier)
+        }
+
         if let glucoseRangeCategoryRawValue = rawValue["glucoseRangeCategory"] as? GlucoseRangeCategory.RawValue {
             self.glucoseRangeCategory = GlucoseRangeCategory(rawValue: glucoseRangeCategoryRawValue)
         }
@@ -844,11 +903,11 @@ extension MockCGMState: RawRepresentable {
             "cgmUpperLimitValue": cgmUpperLimitValue,
         ]
 
-        if let glucoseRangeCategory = glucoseRangeCategory {
+        if let glucoseRangeCategory {
             rawValue["glucoseRangeCategory"] = glucoseRangeCategory.rawValue
         }
         
-        if let cgmStatusHighlight = cgmStatusHighlight {
+        if let cgmStatusHighlight {
             rawValue["localizedMessage"] = cgmStatusHighlight.localizedMessage
             rawValue["alertIdentifier"] = cgmStatusHighlight.alertIdentifier
         }
@@ -857,22 +916,30 @@ extension MockCGMState: RawRepresentable {
             rawValue["statusBadgeType"] = cgmStatusBadgeType.rawValue
         }
         
-        if let cgmLifecycleProgress = cgmLifecycleProgress {
+        if let cgmLifecycleProgress {
             rawValue["cgmLifecycleProgress"] = cgmLifecycleProgress.rawValue
         }
         
-        if let progressWarningThresholdPercentValue = progressWarningThresholdPercentValue {
+        if let progressWarningThresholdPercentValue {
             rawValue["progressWarningThresholdPercentValue"] = progressWarningThresholdPercentValue
         }
         
-        if let progressCriticalThresholdPercentValue = progressCriticalThresholdPercentValue {
+        if let progressCriticalThresholdPercentValue {
             rawValue["progressCriticalThresholdPercentValue"] = progressCriticalThresholdPercentValue
         }
         
-        if let cgmBatteryChargeRemaining = cgmBatteryChargeRemaining {
+        if let cgmBatteryChargeRemaining {
             rawValue["cgmBatteryChargeRemaining"] = cgmBatteryChargeRemaining
         }
-        
+
+        if let heartbeatFobId {
+            rawValue["heartbeatFobId"] = heartbeatFobId
+        }
+
+        if let heartbeatFobPeripheralIdentifier {
+            rawValue["heartbeatFobIdPeripheralIdentifier"] = heartbeatFobPeripheralIdentifier.uuidString
+        }
+
         rawValue["trendRateValue"] = trendRate?.doubleValue(for: .milligramsPerDeciliterPerMinute)
         rawValue["trendType"] = trendType?.rawValue
         rawValue["currentGlucoseValue"] = currentGlucose?.doubleValue(for: .milligramsPerDeciliter)
@@ -901,6 +968,22 @@ extension MockCGMState: CustomDebugStringConvertible {
         * progressWarningThresholdPercentValue: \(progressWarningThresholdPercentValue as Any)
         * progressCriticalThresholdPercentValue: \(progressCriticalThresholdPercentValue as Any)
         * cgmBatteryChargeRemaining: \(cgmBatteryChargeRemaining as Any)
+        * heartbeatFobId: \(heartbeatFobId as Any)
         """
     }
+}
+
+extension MockCGMManager: HeartbeatFobDelegate {
+    public func heartbeatFobTriggeredHeartbeat(_ fob: HeartbeatFob) {
+        self.logDeviceComms(.receive, message: "received heartbeat")
+        self.fetchNewDataIfNeeded() { result in
+            self.sendCGMReadingResult(result)
+        }
+    }
+    
+    public func heartbeatFobSelectionChanged(id: Int?, peripheralIdentifier: UUID?) {
+        self.mockSensorState.heartbeatFobId = id
+        self.mockSensorState.heartbeatFobPeripheralIdentifier = peripheralIdentifier
+    }
+
 }

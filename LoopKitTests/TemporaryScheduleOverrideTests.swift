@@ -7,6 +7,9 @@
 //
 
 import XCTest
+import HealthKit
+import LoopAlgorithm
+
 @testable import LoopKit
 
 extension TimeZone {
@@ -228,18 +231,22 @@ class TemporaryScheduleOverrideTests: XCTestCase {
             RepeatingScheduleValue(startTime: 79200.0, value: 0.225),
         ])!
 
-        let dose = DoseEntry(
-            type: .tempBasal,
-            startDate: date(at: "19:25"),
+        let start = date(at: "19:25")
+
+        let dose = FixtureInsulinDose(
+            deliveryType: .basal,
+            startDate: start,
             endDate: date(at: "19:30"),
-            value: 0.8,
-            unit: .units
+            volume: 0.8,
+            insulinType: .novolog
         )
 
-        let annotated = [dose].annotated(with: schedule)
+        let timeline = schedule.between(start: start, end: start.addingTimeInterval(InsulinMath.longestInsulinActivityDuration))
+
+        let annotated = [dose].annotated(with: timeline)
 
         XCTAssertEqual(3, annotated.count)
-        XCTAssertEqual(dose.programmedUnits, annotated.map { $0.unitsInDeliverableIncrements }.reduce(0, +))
+        XCTAssertEqual(dose.volume, annotated.map { $0.volume }.reduce(0, +))
     }
 
     // MARK: - Target range tests
@@ -272,6 +279,248 @@ class TemporaryScheduleOverrideTests: XCTestCase {
         XCTAssertEqual(rangeSchedule.value(at: overrideStart), overrideRange)
         XCTAssertEqual(rangeSchedule.value(at: overrideStart + overrideDuration), overrideRange)
         XCTAssertEqual(rangeSchedule.value(at: overrideStart + overrideDuration + .hours(2)), overrideRange)
+    }
+
+    func testTimelineSensitivityApplication() {
+        let timeline = [
+            AbsoluteScheduleValue(startDate: .t(1) , endDate: .t(2), value: 50.0),
+            AbsoluteScheduleValue(startDate: .t(2) , endDate: .t(3), value: 75.0),
+            AbsoluteScheduleValue(startDate: .t(3) , endDate: .t(4), value: 25.0),
+            AbsoluteScheduleValue(startDate: .t(4) , endDate: .t(5), value: 100.0),
+        ]
+
+        let overrides: [TemporaryScheduleOverride] = [
+            .custom(scale: 0.5, start: .t(2.5), end: .t(3.5)),
+            .custom(scale: 0.2, start: .t(4.5), end: .t(5))
+        ]
+
+        let applied = overrides.applySensitivity(over: timeline)
+
+        let times = applied.map { $0.startDate }
+        let expectedTimes: [Date] = [.t(1), .t(2), .t(2.5), .t(3), .t(3.5), .t(4), .t(4.5)]
+        XCTAssertEqual(expectedTimes, times)
+
+        let values = applied.map { $0.value }
+        let expectedValues: [Double] = [50, 75, 150, 50, 25, 100, 500]
+        XCTAssertEqual(expectedValues, values)
+    }
+
+    func testTimelineSensitivityApplicationStartingAtSameTime() {
+        let timeline = [
+            AbsoluteScheduleValue(startDate: .t(1) , endDate: .t(2), value: 50.0),
+        ]
+
+        let overrides: [TemporaryScheduleOverride] = [
+            .custom(scale: 0.5, start: .t(1), end: .t(1.5))
+        ]
+
+        let applied = overrides.applySensitivity(over: timeline)
+
+        let times = applied.map { $0.startDate }
+        let expectedTimes: [Date] = [.t(1), .t(1.5)]
+        XCTAssertEqual(expectedTimes, times)
+
+        let values = applied.map { $0.value }
+        let expectedValues: [Double] = [100, 50]
+        XCTAssertEqual(expectedValues, values)
+    }
+
+    func testTimelineSensitivityApplicationEndingAtSameTime() {
+        let timeline = [
+            AbsoluteScheduleValue(startDate: .t(1) , endDate: .t(2), value: 50.0),
+            AbsoluteScheduleValue(startDate: .t(2) , endDate: .t(3), value: 120.0),
+        ]
+
+        let overrides: [TemporaryScheduleOverride] = [
+            .custom(scale: 0.5, start: .t(1.5), end: .t(2))
+        ]
+
+        let applied = overrides.applySensitivity(over: timeline)
+
+        let times = applied.map { $0.startDate }
+        let expectedTimes: [Date] = [.t(1), .t(1.5), .t(2)]
+        XCTAssertEqual(expectedTimes, times)
+
+        let values = applied.map { $0.value }
+        let expectedValues: [Double] = [50, 100, 120]
+        XCTAssertEqual(expectedValues, values)
+    }
+
+    func testTimelineSensitivityApplicationInMiddleOfTimeRange() {
+        let timeline = [
+            AbsoluteScheduleValue(startDate: .t(1) , endDate: .t(3), value: 50.0),
+        ]
+
+        let overrides: [TemporaryScheduleOverride] = [
+            .custom(scale: 0.5, start: .t(1.5), end: .t(2))
+        ]
+
+        let applied = overrides.applySensitivity(over: timeline)
+
+        let times = applied.map { $0.startDate }
+        let expectedTimes: [Date] = [.t(1), .t(1.5), .t(2)]
+        XCTAssertEqual(expectedTimes, times)
+
+        let values = applied.map { $0.value }
+        let expectedValues: [Double] = [50, 100, 50]
+        XCTAssertEqual(expectedValues, values)
+    }
+
+    func testTargetOverride() {
+        let scheduledRange = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 100)...HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 110)
+        let overrideRange = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 80)...HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 90)
+
+        let timeline = [
+            AbsoluteScheduleValue(
+                startDate: .t(0),
+                endDate: .t(4),
+                value: scheduledRange
+            ),
+        ]
+
+        var overrides: [TemporaryScheduleOverride] = [
+            .init(
+                context: .preMeal,
+                settings: .init(targetRange: overrideRange),
+                startDate: .t(2),
+                duration: .finite(.hours(1)),
+                enactTrigger: .local,
+                syncIdentifier: UUID()
+            )
+        ]
+
+        // Test override in future
+        var applied = overrides.applyTarget(over: timeline, at: .t(0))
+
+        var times = applied.map { $0.startDate }
+        var expectedTimes: [Date] = [.t(0), .t(2)]
+        XCTAssertEqual(expectedTimes, times)
+        XCTAssertEqual(.t(4), applied.last!.endDate)
+
+        var values = applied.map { $0.value }
+        var expectedValues: [ClosedRange<HKQuantity>] = [
+            scheduledRange,
+            overrideRange
+        ]
+        XCTAssertEqual(expectedValues, values)
+
+        // Test override currently running
+        applied = overrides.applyTarget(over: timeline, at: .t(2.5))
+
+        times = applied.map { $0.startDate }
+        expectedTimes = [.t(0), .t(2)]
+        XCTAssertEqual(expectedTimes, times)
+        XCTAssertEqual(.t(4), applied.last!.endDate)
+
+        values = applied.map { $0.value }
+        expectedValues = [
+            scheduledRange,
+            overrideRange
+        ]
+        XCTAssertEqual(expectedValues, values)
+
+        // Test override expired
+        applied = overrides.applyTarget(over: timeline, at: .t(3.5))
+
+        times = applied.map { $0.startDate }
+        expectedTimes = [.t(0)]
+        XCTAssertEqual(expectedTimes, times)
+        XCTAssertEqual(.t(4), applied.last!.endDate)
+
+        values = applied.map { $0.value }
+        expectedValues = [
+            scheduledRange
+        ]
+        XCTAssertEqual(expectedValues, values)
+
+        // Test override canceled 30 minutes after start (at 2.5 hours)
+        overrides[0].actualEnd = .early(.t(2.5))
+        applied = overrides.applyTarget(over: timeline, at: .t(2.8))
+
+        times = applied.map { $0.startDate }
+        XCTAssertEqual([.t(0)], times)
+        XCTAssertEqual(.t(4), applied.last!.endDate)
+
+        values = applied.map { $0.value }
+        XCTAssertEqual([scheduledRange], values)
+    }
+
+    func testPreMealPreset() {
+        let now = ISO8601DateFormatter().date(from: "2020-03-11T12:13:14-0700")!
+
+        var input = AlgorithmInputFixture.mock(for: now)
+        input.recommendationType = .tempBasal
+
+        func d(_ interval: TimeInterval) -> Date {
+            return now.addingTimeInterval(interval)
+        }
+
+        // Flat, in range bg.
+        input.glucoseHistory = [
+            FixtureGlucoseSample(startDate: d(.minutes(-19)), quantity: .glucose(value: 105)),
+            FixtureGlucoseSample(startDate: d(.minutes(-14)), quantity: .glucose(value: 105)),
+            FixtureGlucoseSample(startDate: d(.minutes(-9)), quantity: .glucose(value: 105)),
+            FixtureGlucoseSample(startDate: d(.minutes(-4)), quantity: .glucose(value: 105)),
+        ]
+
+        let scheduledRange = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 100)...HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 110)
+        let overrideRange = HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 80)...HKQuantity(unit: .milligramsPerDeciliter, doubleValue: 90)
+
+        let overrideStartTime = d(.minutes(-10))
+
+        let overrides: [TemporaryScheduleOverride] = [
+            .init(
+                context: .preMeal,
+                settings: .init(targetRange: overrideRange),
+                startDate: overrideStartTime,
+                duration: .finite(.hours(1)),
+                enactTrigger: .local,
+                syncIdentifier: UUID()
+            )
+        ]
+
+        let targetTimeline: [AbsoluteScheduleValue<ClosedRange<HKQuantity>>] = [
+            AbsoluteScheduleValue(startDate: d(.hours(-2)), endDate: d(.hours(10)), value: scheduledRange)
+        ]
+
+        input.target = overrides.applyTarget(over: targetTimeline, at: now)
+
+        input.doses = []
+        input.carbEntries = []
+
+        let output = LoopAlgorithm.run(input: input)
+
+        let recommendedRate = output.recommendation!.automatic!.basalAdjustment!.unitsPerHour
+        let activeInsulin = output.activeInsulin!
+        XCTAssertEqual(activeInsulin, 0)
+        XCTAssertEqual(recommendedRate, 1.727, accuracy: 0.01)
+    }
+
+}
+
+extension Date {
+    static func t(_ hours: Double) -> Date {
+        return .init(timeIntervalSince1970: .hours(hours))
+    }
+}
+
+extension TemporaryScheduleOverride {
+    static func custom(scale: Double? = nil, target: ClosedRange<Double>? = nil, start: Date, end: Date?) -> TemporaryScheduleOverride {
+        let targetRange = target.map {
+            ClosedRange(uncheckedBounds: (
+                lower: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: $0.lowerBound),
+                upper: HKQuantity(unit: .milligramsPerDeciliter, doubleValue: $0.upperBound)))
+        }
+        let settings = TemporaryScheduleOverrideSettings(targetRange: targetRange, insulinNeedsScaleFactor: scale)
+        let duration: TimeInterval? = end.map { $0.timeIntervalSince(start) }
+        return TemporaryScheduleOverride(
+            context: .custom,
+            settings: settings,
+            startDate: start,
+            duration: duration != nil ? .finite(duration!) : .indefinite,
+            enactTrigger: .local,
+            syncIdentifier: UUID()
+        )
     }
 }
 
@@ -513,3 +762,48 @@ class TemporaryOverrideEndCodableTests: XCTestCase {
         let end: End
     }
 }
+
+extension AlgorithmInputFixture {
+    /// Mocks stable, in range glucose, no insulin, no carbs, with reasonable settings
+    static func mock(for now: Date = Date()) -> AlgorithmInputFixture {
+
+        func d(_ interval: TimeInterval) -> Date {
+            return now.addingTimeInterval(interval)
+        }
+
+        let forecastEnd = now.addingTimeInterval(InsulinMath.defaultInsulinActivityDuration).dateCeiledToTimeInterval(GlucoseMath.defaultDelta)
+
+        return AlgorithmInputFixture(
+            predictionStart: now,
+            glucoseHistory: [
+                FixtureGlucoseSample(startDate: d(.minutes(-19)), quantity: .glucose(value: 100)),
+                FixtureGlucoseSample(startDate: d(.minutes(-14)), quantity: .glucose(value: 120)),
+                FixtureGlucoseSample(startDate: d(.minutes(-9)), quantity: .glucose(value: 140)),
+                FixtureGlucoseSample(startDate: d(.minutes(-4)), quantity: .glucose(value: 160)),
+            ],
+            doses: [],
+            carbEntries: [],
+            basal: [AbsoluteScheduleValue(startDate: d(.hours(-10)), endDate: now, value: 1.0)],
+            sensitivity: [AbsoluteScheduleValue(startDate: d(.hours(-10)), endDate: forecastEnd, value: .glucose(value: 55))],
+            carbRatio: [AbsoluteScheduleValue(startDate: d(.hours(-10)), endDate: now, value: 10)],
+            target: [AbsoluteScheduleValue(startDate: d(.hours(-10)), endDate: now, value: ClosedRange(uncheckedBounds: (lower: .glucose(value: 100), upper: .glucose(value: 110))))],
+            suspendThreshold: .glucose(value: 65),
+            maxBolus: 6,
+            maxBasalRate: 8,
+            recommendationInsulinType: .novolog,
+            recommendationType: .tempBasal
+        )
+    }
+}
+
+extension HKQuantity {
+    static func glucose(value: Double) -> HKQuantity {
+        return .init(unit: .milligramsPerDeciliter, doubleValue: value)
+    }
+
+    static func carbs(value: Double) -> HKQuantity {
+        return .init(unit: .gram(), doubleValue: value)
+    }
+
+}
+

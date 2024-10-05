@@ -6,6 +6,7 @@
 //
 
 import HealthKit
+import LoopAlgorithm
 
 
 /// Defines the scheduled basal insulin rate during the time of the basal delivery sample
@@ -43,7 +44,7 @@ extension HKQuantitySample {
             MetadataKeyHasLoopKitOrigin: true,
             MetadataKeyManuallyEntered: dose.manuallyEntered
         ]
-        
+
         switch dose.type {
         case .suspend:
             metadata[HKMetadataKeyInsulinDeliveryReason] = HKInsulinDeliveryReason.basal.rawValue
@@ -80,11 +81,11 @@ extension HKQuantitySample {
         case .resume:
             return nil
         }
-        
+
         if let insulinType = dose.insulinType {
             metadata[MetadataKeyInsulinType] = insulinType.healthKitRepresentation
         }
-        
+
         if let automatic = dose.automatic {
             metadata[MetadataKeyAutomaticallyIssued] = automatic
         }
@@ -130,16 +131,16 @@ extension HKQuantitySample {
     var manuallyEntered: Bool {
         return metadata?[MetadataKeyManuallyEntered] as? Bool ?? false
     }
-    
+
     var automaticallyIssued: Bool? {
         return metadata?[MetadataKeyAutomaticallyIssued] as? Bool
     }
-    
+
     var insulinType: InsulinType? {
         guard let rawType = metadata?[MetadataKeyInsulinType] as? String else {
             return nil
         }
-        
+
         return InsulinType(healthKitRepresentation: rawType)
     }
 
@@ -172,16 +173,28 @@ extension HKQuantitySample {
             return nil
         }
 
-        let value: Double
+        let programmedValue: Double
         let unit: DoseUnit
         let deliveredUnits: Double?
-        
-        if let programmedRate = programmedTempBasalRate {
-            value = programmedRate.doubleValue(for: .internationalUnitsPerHour)
+
+        if type == .tempBasal,
+           let programmedRate = programmedTempBasalRate
+        {
+            programmedValue = programmedRate.doubleValue(for: .internationalUnitsPerHour)
             unit = .unitsPerHour
             deliveredUnits = quantity.doubleValue(for: .internationalUnit())
+        } else if type == .basal,
+                  let programmedRate = scheduledBasalRate
+        {
+            programmedValue = programmedRate.doubleValue(for: .internationalUnitsPerHour)
+            unit = .unitsPerHour
+            deliveredUnits = quantity.doubleValue(for: .internationalUnit())
+        } else if type == .suspend {
+            deliveredUnits = 0
+            programmedValue = 0
+            unit = .units
         } else {
-            value = quantity.doubleValue(for: .internationalUnit())
+            programmedValue = quantity.doubleValue(for: .internationalUnit())
             unit = .units
             deliveredUnits = nil
         }
@@ -190,7 +203,7 @@ extension HKQuantitySample {
             type: type,
             startDate: startDate,
             endDate: endDate,
-            value: value,
+            value: programmedValue,
             unit: unit,
             deliveredUnits: deliveredUnits,
             description: nil,
@@ -229,7 +242,7 @@ extension InsulinType {
             return InsulinTypeHealthKitRepresentation.afrezza.rawValue
         }
     }
-    
+
     init?(healthKitRepresentation: String) {
         switch healthKitRepresentation {
         case InsulinTypeHealthKitRepresentation.novolog.rawValue:

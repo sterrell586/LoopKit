@@ -8,7 +8,7 @@
 
 import Foundation
 import HealthKit
-
+import LoopAlgorithm
 
 public struct TemporaryScheduleOverride: Hashable {
     public enum Context: Hashable {
@@ -106,7 +106,15 @@ public struct TemporaryScheduleOverride: Hashable {
         return date > actualEndDate
     }
 
-    public init(context: Context, settings: TemporaryScheduleOverrideSettings, startDate: Date, duration: Duration, enactTrigger: EnactTrigger, syncIdentifier: UUID, actualEnd: End = .natural) {
+    public init(
+        context: Context,
+        settings: TemporaryScheduleOverrideSettings,
+        startDate: Date,
+        duration: Duration,
+        enactTrigger: EnactTrigger,
+        syncIdentifier: UUID,
+        actualEnd: End = .natural
+    ) {
         precondition(duration.timeInterval > 0)
         self.context = context
         self.settings = settings
@@ -416,5 +424,172 @@ extension TemporaryScheduleOverride.EnactTrigger: Codable {
     private enum CodableKeys: String, CodingKey {
         case local
         case remote
+    }
+}
+
+extension Array where Element == TemporaryScheduleOverride {
+
+    public func applySensitivity(over timeline: [AbsoluteScheduleValue<Double>]) -> [AbsoluteScheduleValue<Double>] {
+        apply(over: timeline) { value, override in
+            value / override.settings.effectiveInsulinNeedsScaleFactor
+        }
+    }
+
+    public func applySensitivity(over timeline: [AbsoluteScheduleValue<HKQuantity>]) -> [AbsoluteScheduleValue<HKQuantity>] {
+        apply(over: timeline) { quantity, override in
+            let value = quantity.doubleValue(for: .milligramsPerDeciliter)
+            return HKQuantity(
+                unit: .milligramsPerDeciliter,
+                doubleValue: value / override.settings.effectiveInsulinNeedsScaleFactor
+            )
+        }
+    }
+
+    public func applyBasal(over timeline: [AbsoluteScheduleValue<Double>]) -> [AbsoluteScheduleValue<Double>] {
+        apply(over: timeline) { value, override in
+            value * override.settings.effectiveInsulinNeedsScaleFactor
+        }
+    }
+
+    public func applyCarbRatio(over timeline: [AbsoluteScheduleValue<Double>]) -> [AbsoluteScheduleValue<Double>] {
+        apply(over: timeline) { value, override in
+            value * override.settings.effectiveInsulinNeedsScaleFactor
+        }
+    }
+
+    /// Takes a history of scheduled targets and applies this set of overrides to it, returning a new timeline adjusted for
+    /// the current or next future override, based on date.
+    ///
+    /// - Parameters:
+    ///   - timeline: A timeline of scheduled targets.
+    ///   - date: The date indicating the current time for use in a forecast creation
+    ///
+    /// - returns: A new timeline with an override applied, if one is applicable.
+    public func applyTarget(over timeline: [AbsoluteScheduleValue<ClosedRange<HKQuantity>>], at date: Date) -> [AbsoluteScheduleValue<ClosedRange<HKQuantity>>] {
+
+        guard timeline.count > 0 else {
+            return []
+        }
+
+        var applicableOverride: TemporaryScheduleOverride? = nil
+        let scheduleEndDate = timeline.last!.endDate
+
+        // Look for active or future override
+        for override in self {
+            if override.actualEndDate > date && override.startDate < scheduleEndDate {
+                // override is active or future
+                applicableOverride = override
+                break
+            }
+        }
+
+        if let applicableOverride, let overrideTarget = applicableOverride.settings.targetRange {
+            var result: [AbsoluteScheduleValue<ClosedRange<HKQuantity>>] = []
+
+            let overrideStart = applicableOverride.startDate
+
+            for entry in timeline {
+                if entry.startDate < overrideStart {
+                    if entry.endDate > overrideStart {
+                        result.append(
+                            AbsoluteScheduleValue(
+                                startDate: entry.startDate,
+                                endDate: overrideStart,
+                                value: entry.value
+                            )
+                        )
+                    } else {
+                        result.append(entry)
+                    }
+                }
+
+            }
+
+            result.append(
+                AbsoluteScheduleValue(
+                    startDate: applicableOverride.startDate,
+                    endDate: scheduleEndDate,
+                    value: overrideTarget
+                )
+            )
+            return result
+        } else {
+            return timeline
+        }
+    }
+
+    fileprivate func apply<T>(
+        over timeline: [AbsoluteScheduleValue<T>],
+        transform: (T, TemporaryScheduleOverride) -> T
+    ) -> [AbsoluteScheduleValue<T>]
+    {
+        guard timeline.count > 0 else {
+            return []
+        }
+
+        var result: [AbsoluteScheduleValue<T>] = []
+        var presetIndex = 0
+
+        for entry in timeline {
+            var start = entry.startDate
+
+            while presetIndex < self.count {
+                let preset = self[presetIndex]
+
+                // Skip presets that end before this sensitivity period
+                if preset.actualEndDate < start {
+                    presetIndex += 1
+                    continue
+                }
+
+                if preset.isActive(at: start) {
+                    let newValue = transform(entry.value, preset)
+                    let end = Swift.min(entry.endDate, preset.actualEndDate)
+                    result.append(AbsoluteScheduleValue(
+                        startDate: start,
+                        endDate: end,
+                        value: newValue
+                    ))
+                    if entry.endDate > end {
+                        presetIndex += 1
+                    }
+
+                    if preset.actualEndDate > entry.endDate {
+                        break
+                    }
+
+                    start = end
+                } else if preset.startDate < entry.endDate {
+                    result.append(AbsoluteScheduleValue(
+                        startDate: start,
+                        endDate: preset.startDate,
+                        value: entry.value
+                    ))
+                    let newValue = transform(entry.value, preset)
+                    let endDate = Swift.min(entry.endDate, preset.actualEndDate)
+                    result.append(AbsoluteScheduleValue(
+                        startDate: preset.startDate,
+                        endDate: endDate,
+                        value: newValue
+                    ))
+                    start = endDate
+                    if preset.actualEndDate > entry.endDate {
+                        break
+                    }
+                    presetIndex += 1
+                } else {
+                    break
+                }
+            }
+            if start < entry.endDate {
+                result.append(AbsoluteScheduleValue(
+                    startDate: start,
+                    endDate: entry.endDate,
+                    value: entry.value
+                ))
+                start = entry.endDate
+            }
+        }
+        return result
     }
 }

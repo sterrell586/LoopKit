@@ -12,6 +12,7 @@ import LoopKit
 import LoopKitUI
 import MockKit
 import SwiftUI
+import LoopAlgorithm
 
 
 final class MockPumpManagerSettingsViewController: UITableViewController {
@@ -237,6 +238,7 @@ final class MockPumpManagerSettingsViewController: UITableViewController {
                 cell.textLabel?.text = "Reservoir Remaining"
                 cell.detailTextLabel?.text = reservoirFormatter.string(from: HKQuantity(unit: .internationalUnit(), doubleValue: pumpManager.state.reservoirUnitsRemaining))
                 cell.accessoryType = .disclosureIndicator
+                cell.accessibilityIdentifier = "mockPumpSettingsReservoirRemaining"
                 return cell
             case .batteryRemaining:
                 let cell = tableView.dequeueReusableCell(withIdentifier: SettingsTableViewCell.className, for: indexPath)
@@ -471,7 +473,7 @@ final class MockPumpManagerSettingsViewController: UITableViewController {
             case .lastReconciliationDate:
                 
                 let resetAction = UIContextualAction(style: .normal, title:  "Reset") {[weak self] _,_,_ in
-                    self?.pumpManager.testLastReconciliation = nil
+                    self?.pumpManager.lastSync = nil
                     tableView.reloadRows(at: [indexPath], with: .automatic)
                 }
                 resetAction.backgroundColor = .systemRed
@@ -493,7 +495,7 @@ extension MockPumpManagerSettingsViewController: DatePickerTableViewCellDelegate
 
         switch SettingsRow(rawValue: row) {
         case .lastReconciliationDate?:
-            pumpManager.testLastReconciliation = cell.date
+            pumpManager.lastSync = cell.date
         default:
             break
         }

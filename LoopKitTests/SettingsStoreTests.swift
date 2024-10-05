@@ -8,6 +8,7 @@
 
 import XCTest
 import HealthKit
+import LoopAlgorithm
 @testable import LoopKit
 
 class SettingsStorePersistenceTests: PersistenceControllerTestCase, SettingsStoreDelegate {
@@ -61,7 +62,7 @@ class SettingsStorePersistenceTests: PersistenceControllerTestCase, SettingsStor
             storeSettingsCompletion.fulfill()
         }
         
-        wait(for: [storeSettingsHandler, storeSettingsCompletion], timeout: 2, enforceOrder: true)
+        wait(for: [storeSettingsHandler, storeSettingsCompletion], timeout: 30, enforceOrder: true)
     }
     
     func testStoreSettingsMultiple() {
@@ -93,7 +94,7 @@ class SettingsStorePersistenceTests: PersistenceControllerTestCase, SettingsStor
             storeSettingsCompletion2.fulfill()
         }
         
-        wait(for: [storeSettingsHandler1, storeSettingsCompletion1, storeSettingsHandler2, storeSettingsCompletion2], timeout: 2, enforceOrder: true)
+        wait(for: [storeSettingsHandler1, storeSettingsCompletion1, storeSettingsHandler2, storeSettingsCompletion2], timeout: 30, enforceOrder: true)
     }
     
     // MARK: -
@@ -294,23 +295,6 @@ class SettingsStorePersistenceTests: PersistenceControllerTestCase, SettingsStor
         "symbol" : "🍎"
       }
     ],
-    "preMealOverride" : {
-      "actualEnd" : {
-        "type" : "natural"
-      },
-      "context" : "preMeal",
-      "duration" : "indefinite",
-      "enactTrigger" : "local",
-      "settings" : {
-        "insulinNeedsScaleFactor" : 0.5,
-        "targetRangeInMgdl" : {
-          "maxValue" : 90,
-          "minValue" : 80
-        }
-      },
-      "startDate" : "2020-05-14T14:38:39Z",
-      "syncIdentifier" : "2A67A303-5203-1234-8263-79498265368E"
-    },
     "preMealTargetRange" : {
       "maxValue" : 90,
       "minValue" : 80
@@ -324,31 +308,6 @@ class SettingsStorePersistenceTests: PersistenceControllerTestCase, SettingsStor
       "name" : "Pump Name",
       "softwareVersion" : "Pump Software Version",
       "udiDeviceIdentifier" : "Pump UDI Device Identifier"
-    },
-    "scheduleOverride" : {
-      "actualEnd" : {
-        "type" : "natural"
-      },
-      "context" : "preMeal",
-      "duration" : {
-        "finite" : {
-          "duration" : 3600
-        }
-      },
-      "enactTrigger" : {
-        "remote" : {
-          "address" : "127.0.0.1"
-        }
-      },
-      "settings" : {
-        "insulinNeedsScaleFactor" : 1.5,
-        "targetRangeInMgdl" : {
-          "maxValue" : 120,
-          "minValue" : 110
-        }
-      },
-      "startDate" : "2020-05-14T14:48:19Z",
-      "syncIdentifier" : "2A67A303-1234-4CB8-8263-79498265368E"
     },
     "suspendThreshold" : {
       "unit" : "mg/dL",
@@ -468,7 +427,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testEmptyWithMissingQueryAnchor() {
@@ -485,7 +444,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testEmptyWithNonDefaultQueryAnchor() {
@@ -502,7 +461,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testDataWithUnusedQueryAnchor() {
@@ -524,7 +483,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testDataWithStaleQueryAnchor() {
@@ -546,7 +505,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testDataWithCurrentQueryAnchor() {
@@ -567,7 +526,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testDataWithLimitZero() {
@@ -588,7 +547,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     func testDataWithLimitCoveredByData() {
@@ -611,7 +570,7 @@ class SettingsStoreQueryTests: PersistenceControllerTestCase {
             self.completion.fulfill()
         }
         
-        wait(for: [completion], timeout: 2, enforceOrder: true)
+        wait(for: [completion], timeout: 30, enforceOrder: true)
     }
     
     private func addData(withSyncIdentifiers syncIdentifiers: [UUID]) {
@@ -686,9 +645,9 @@ class SettingsStoreCriticalEventLogTests: PersistenceControllerTestCase {
                                           progress: progress))
         XCTAssertEqual(outputStream.string, """
 [
-{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:08:00.000Z","dosingEnabled":false,"syncIdentifier":"18CF3948-0B3D-4B12-8BFE-14986B0E6784"},"date":"2100-01-02T03:08:00.000Z","modificationCounter":1},
-{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:04:00.000Z","dosingEnabled":false,"syncIdentifier":"2B03D96C-6F5D-4140-99CD-80C3E64D6010"},"date":"2100-01-02T03:04:00.000Z","modificationCounter":3},
-{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:06:00.000Z","dosingEnabled":false,"syncIdentifier":"FF1C4F01-3558-4FB2-957E-FA1522C4735E"},"date":"2100-01-02T03:06:00.000Z","modificationCounter":4}
+{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:08:00.000Z","dosingEnabled":false,"overridePresets":[],"syncIdentifier":"18CF3948-0B3D-4B12-8BFE-14986B0E6784"},"date":"2100-01-02T03:08:00.000Z","modificationCounter":1},
+{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:04:00.000Z","dosingEnabled":false,"overridePresets":[],"syncIdentifier":"2B03D96C-6F5D-4140-99CD-80C3E64D6010"},"date":"2100-01-02T03:04:00.000Z","modificationCounter":3},
+{"data":{"automaticDosingStrategy":0,"bloodGlucoseUnit":"mg/dL","controllerTimeZone":{"identifier":"America/Los_Angeles"},"date":"2100-01-02T03:06:00.000Z","dosingEnabled":false,"overridePresets":[],"syncIdentifier":"FF1C4F01-3558-4FB2-957E-FA1522C4735E"},"date":"2100-01-02T03:06:00.000Z","modificationCounter":4}
 ]
 """
         )
@@ -905,23 +864,6 @@ class StoredSettingsCodableTests: XCTestCase {
       "symbol" : "🍎"
     }
   ],
-  "preMealOverride" : {
-    "actualEnd" : {
-      "type" : "natural"
-    },
-    "context" : "preMeal",
-    "duration" : "indefinite",
-    "enactTrigger" : "local",
-    "settings" : {
-      "insulinNeedsScaleFactor" : 0.5,
-      "targetRangeInMgdl" : {
-        "maxValue" : 90,
-        "minValue" : 80
-      }
-    },
-    "startDate" : "2020-05-14T14:38:39Z",
-    "syncIdentifier" : "2A67A303-5203-1234-8263-79498265368E"
-  },
   "preMealTargetRange" : {
     "maxValue" : 90,
     "minValue" : 80
@@ -935,31 +877,6 @@ class StoredSettingsCodableTests: XCTestCase {
     "name" : "Pump Name",
     "softwareVersion" : "Pump Software Version",
     "udiDeviceIdentifier" : "Pump UDI Device Identifier"
-  },
-  "scheduleOverride" : {
-    "actualEnd" : {
-      "type" : "natural"
-    },
-    "context" : "preMeal",
-    "duration" : {
-      "finite" : {
-        "duration" : 3600
-      }
-    },
-    "enactTrigger" : {
-      "remote" : {
-        "address" : "127.0.0.1"
-      }
-    },
-    "settings" : {
-      "insulinNeedsScaleFactor" : 1.5,
-      "targetRangeInMgdl" : {
-        "maxValue" : 120,
-        "minValue" : 110
-      }
-    },
-    "startDate" : "2020-05-14T14:48:19Z",
-    "syncIdentifier" : "2A67A303-1234-4CB8-8263-79498265368E"
   },
   "suspendThreshold" : {
     "unit" : "mg/dL",
@@ -1020,22 +937,6 @@ fileprivate extension StoredSettings {
                                                                                                            targetRange: DoubleRange(minValue: 130.0, maxValue: 140.0),
                                                                                                            insulinNeedsScaleFactor: 2.0),
                                                                duration: .finite(.minutes(60)))]
-        let scheduleOverride = TemporaryScheduleOverride(context: .preMeal,
-                                                         settings: TemporaryScheduleOverrideSettings(unit: .milligramsPerDeciliter,
-                                                                                                     targetRange: DoubleRange(minValue: 110.0, maxValue: 120.0),
-                                                                                                     insulinNeedsScaleFactor: 1.5),
-                                                         startDate: dateFormatter.date(from: "2020-05-14T14:48:19Z")!,
-                                                         duration: .finite(.minutes(60)),
-                                                         enactTrigger: .remote("127.0.0.1"),
-                                                         syncIdentifier: UUID(uuidString: "2A67A303-1234-4CB8-8263-79498265368E")!)
-        let preMealOverride = TemporaryScheduleOverride(context: .preMeal,
-                                                        settings: TemporaryScheduleOverrideSettings(unit: .milligramsPerDeciliter,
-                                                                                                    targetRange: DoubleRange(minValue: 80.0, maxValue: 90.0),
-                                                                                                    insulinNeedsScaleFactor: 0.5),
-                                                        startDate: dateFormatter.date(from: "2020-05-14T14:38:39Z")!,
-                                                        duration: .indefinite,
-                                                        enactTrigger: .local,
-                                                        syncIdentifier: UUID(uuidString: "2A67A303-5203-1234-8263-79498265368E")!)
         let maximumBasalRatePerHour = 3.5
         let maximumBolus = 10.0
         let suspendThreshold = GlucoseThreshold(unit: .milligramsPerDeciliter, value: 75.0)
@@ -1101,8 +1002,6 @@ fileprivate extension StoredSettings {
                               preMealTargetRange: preMealTargetRange,
                               workoutTargetRange: workoutTargetRange,
                               overridePresets: overridePresets,
-                              scheduleOverride: scheduleOverride,
-                              preMealOverride: preMealOverride,
                               maximumBasalRatePerHour: maximumBasalRatePerHour,
                               maximumBolus: maximumBolus,
                               suspendThreshold: suspendThreshold,

@@ -8,7 +8,7 @@
 
 import Foundation
 import HealthKit
-
+import LoopAlgorithm
 
 public struct DoubleRange {
     public let minValue: Double
@@ -23,7 +23,6 @@ public struct DoubleRange {
         return abs(minValue) < .ulpOfOne && abs(maxValue) < .ulpOfOne
     }
 }
-
 
 extension DoubleRange: RawRepresentable {
     public typealias RawValue = [Double]
@@ -49,9 +48,19 @@ extension DoubleRange: Equatable {
     }
 }
 
+extension DoubleRange {
+    public func quantityRange(for unit: HKUnit) -> ClosedRange<HKQuantity> {
+        let lowerBound = HKQuantity(unit: unit, doubleValue: minValue)
+        let upperBound = HKQuantity(unit: unit, doubleValue: maxValue)
+        return lowerBound...upperBound
+    }
+}
+
 extension DoubleRange: Hashable {}
 
 extension DoubleRange: Codable {}
+
+public typealias GlucoseRangeTimeline = [AbsoluteScheduleValue<ClosedRange<HKQuantity>>]
 
 /// Defines a daily schedule of glucose ranges
 public struct GlucoseRangeSchedule: DailySchedule, Equatable {
@@ -125,8 +134,8 @@ public struct GlucoseRangeSchedule: DailySchedule, Equatable {
         }
     }
 
-    public func quantityBetween(start: Date, end: Date) -> [AbsoluteScheduleValue<ClosedRange<HKQuantity>>] {
-        var quantitySchedule = [AbsoluteScheduleValue<ClosedRange<HKQuantity>>]()
+    public func quantityBetween(start: Date, end: Date) -> GlucoseRangeTimeline {
+        var quantitySchedule = GlucoseRangeTimeline()
 
         for schedule in between(start: start, end: end) {
             quantitySchedule.append(AbsoluteScheduleValue(
@@ -227,14 +236,6 @@ extension ClosedRange where Bound == HKQuantity {
         let minValue = lowerBound.doubleValue(for: unit)
         let maxValue = upperBound.doubleValue(for: unit)
         return (maxValue + minValue) / 2
-    }
-}
-
-extension DoubleRange {
-    public func quantityRange(for unit: HKUnit) -> ClosedRange<HKQuantity> {
-        let lowerBound = HKQuantity(unit: unit, doubleValue: minValue)
-        let upperBound = HKQuantity(unit: unit, doubleValue: maxValue)
-        return lowerBound...upperBound
     }
 }
 

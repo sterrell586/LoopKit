@@ -7,6 +7,7 @@
 //
 
 import HealthKit
+import LoopAlgorithm
 
 public extension Guardrail where Value == HKQuantity {
     static let suspendThreshold = Guardrail(absoluteBounds: (66.1)...(110.9), recommendedBounds: (73.1)...(80.9), unit: .milligramsPerDeciliter, startingSuggestion: 80)
@@ -23,7 +24,7 @@ public extension Guardrail where Value == HKQuantity {
         .min()!
     }
 
-    static let correctionRange = Guardrail(absoluteBounds: (86.1)...(180.5), recommendedBounds: (99.1)...(115.9), unit: .milligramsPerDeciliter, startingSuggestion: 100)
+    static let correctionRange = Guardrail(absoluteBounds: (86.1)...(180.5), recommendedBounds: (99.1)...125, unit: .milligramsPerDeciliter, startingSuggestion: 100)
 
     static func minCorrectionRangeValue(suspendThreshold: GlucoseThreshold?) -> HKQuantity {
         return [
@@ -79,7 +80,7 @@ public extension Guardrail where Value == HKQuantity {
     }
     
     static let insulinSensitivity = Guardrail(
-        absoluteBounds: (9.1)...(500.9),
+        absoluteBounds: 5...(500.9),
         recommendedBounds: (15.1)...(399.9),
         unit: HKUnit.milligramsPerDeciliter.unitDivided(by: .internationalUnit()),
         startingSuggestion: 50
@@ -118,20 +119,23 @@ public extension Guardrail where Value == HKQuantity {
 
         let recommendedLowerBound: Double
         let recommendedUpperBound: Double
+        let filteredSupportedBasalRates = supportedBasalRates.drop { $0 <= 0 }.map { Double($0) }
+        
         if let highestScheduledBasalRate = scheduledBasalRange?.upperBound {
-            recommendedLowerBound = (recommendedLowScheduledBasalScaleFactor * highestScheduledBasalRate).matchingOrTruncatedValue(from: supportedBasalRates, withinDecimalPlaces: decimalPlaces)
-            recommendedUpperBound = (recommendedHighScheduledBasalScaleFactor * highestScheduledBasalRate).matchingOrTruncatedValue(from: supportedBasalRates, withinDecimalPlaces: decimalPlaces)
+            let referenceScheduledBasalRate = highestScheduledBasalRate <= 0 ? filteredSupportedBasalRates.first! : highestScheduledBasalRate
+            recommendedLowerBound = (recommendedLowScheduledBasalScaleFactor * referenceScheduledBasalRate).matchingOrTruncatedValue(from: filteredSupportedBasalRates, withinDecimalPlaces: decimalPlaces)
+            recommendedUpperBound = (recommendedHighScheduledBasalScaleFactor * referenceScheduledBasalRate).matchingOrTruncatedValue(from: filteredSupportedBasalRates, withinDecimalPlaces: decimalPlaces)
             
-            let absoluteBounds = highestScheduledBasalRate...max(absoluteUpperBound, recommendedUpperBound)
+            let absoluteBounds = referenceScheduledBasalRate...max(absoluteUpperBound, recommendedUpperBound)
             let recommendedBounds = (recommendedLowerBound...recommendedUpperBound).clamped(to: absoluteBounds)
+
             return Guardrail(
                 absoluteBounds: absoluteBounds,
                 recommendedBounds: recommendedBounds,
                 unit: .internationalUnitsPerHour
             )
-
         } else {
-            let bounds = supportedBasalRates.drop { $0 <= 0 }.first!...absoluteUpperBound
+            let bounds = filteredSupportedBasalRates.first!...absoluteUpperBound
             return Guardrail(
                 absoluteBounds: bounds,
                 recommendedBounds: bounds,

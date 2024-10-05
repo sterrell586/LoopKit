@@ -182,15 +182,16 @@ extension InsulinDeliveryStore {
     ///   - start: The earliest date of dose entries to retrieve, if provided.
     ///   - end: The latest date of dose entries to retrieve, if provided.
     ///   - includeMutable: Whether to include mutable dose entries or not. Defaults to false.
-    ///   - completion: A closure called once the dose entries have been retrieved.
-    ///   - result: An array of dose entries, in chronological order by startDate, or error.
-    public func getDoseEntries(start: Date? = nil, end: Date? = nil, includeMutable: Bool = false, completion: @escaping (_ result: Result<[DoseEntry], Error>) -> Void) {
-        queue.async {
-            completion(self.getDoseEntries(start: start, end: end, includeMutable: includeMutable))
+    ///   - returns: An array of dose entries, in chronological order by startDate, or error.
+    public func getDoseEntries(start: Date? = nil, end: Date? = nil, includeMutable: Bool = false) async throws -> [DoseEntry] {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                continuation.resume(with: self.getDoseEntriesInternal(start: start, end: end, includeMutable: includeMutable))
+            }
         }
     }
 
-    private func getDoseEntries(start: Date? = nil, end: Date? = nil, includeMutable: Bool = false) -> Result<[DoseEntry], Error> {
+    private func getDoseEntriesInternal(start: Date? = nil, end: Date? = nil, includeMutable: Bool = false) -> Result<[DoseEntry], Error> {
         dispatchPrecondition(condition: .onQueue(queue))
 
         var entries: [DoseEntry] = []
@@ -276,6 +277,19 @@ extension InsulinDeliveryStore {
         }
     }
 
+    public func getManuallyEnteredDoses(since startDate: Date, chronological: Bool = true, limit: Int? = nil) async throws -> [DoseEntry] {
+        try await withCheckedThrowingContinuation { continuation in
+            getManuallyEnteredDoses(since: startDate, chronological: chronological, limit: limit) { result in
+                switch result {
+                case .success(let entries):
+                    continuation.resume(returning: entries)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     /// Retrieves boluses
     ///
     /// - Parameters:
@@ -314,58 +328,22 @@ extension InsulinDeliveryStore {
         })
     }
 
-    /// Retrieves doses overlapping supplied range
-    ///
-    /// - Parameters:
-    ///   - start:If non-nil, select boluses that ended after start.
-    ///   - end: If non-nil, select boluses that started before end.
-    ///   - limit: If non-nill, specify the max number of boluses to return.
-    ///   - returns: A list of DoseEntry objects representing the basal doses matching the passed constraints
-    public func getDoses(start: Date? = nil, end: Date? = nil, limit: Int? = nil) async throws -> [DoseEntry] {
-        return try await withCheckedThrowingContinuation({ continuation in
-            queue.async {
-                self.cacheStore.managedObjectContext.performAndWait {
-                    let request: NSFetchRequest<CachedInsulinDeliveryObject> = CachedInsulinDeliveryObject.fetchRequest()
-
-                    var predicates = [NSPredicate(format: "deletedAt == NIL")]
-                    if let start {
-                        predicates.append(NSPredicate(format: "endDate >= %@", start as NSDate))
-                    }
-                    if let end {
-                        predicates.append(NSPredicate(format: "startDate <= %@", end as NSDate))
-                    }
-                    request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-
-                    request.sortDescriptors = [NSSortDescriptor(key: "startDate", ascending: true)]
-                    if let limit {
-                        request.fetchLimit = limit
-                    }
-
-                    do {
-                        let doses = try self.cacheStore.managedObjectContext.fetch(request).compactMap{ $0.dose }
-                        continuation.resume(returning: doses)
-                    } catch {
-                        continuation.resume(throwing: error)
-                    }
-                }
-            }
-        })
-    }
-
 
     /// Returns the end date of the most recent basal dose entry.
     ///
     /// - Parameters:
     ///   - completion: A closure called when the date has been retrieved with date.
     ///   - result: The date, or error.
-    func getLastImmutableBasalEndDate(_ completion: @escaping (_ result: Result<Date, Error>) -> Void) {
+    func getLastImmutableBasalEndDate(_ completion: @escaping (Date?) -> Void) {
         queue.async {
-            switch self.lastImmutableBasalEndDate {
-            case .some(let date):
-                completion(.success(date))
-            case .none:
-                // TODO: send a proper error
-                completion(.failure(DoseStore.DoseStoreError.initializationError(description: "lastImmutableBasalEndDate has not been set", recoverySuggestion: "Avoid accessing InsulinDeliveryStore until initialization is complete")))
+            completion(self.lastImmutableBasalEndDate)
+        }
+    }
+
+    func getLastImmutableBasalEndDate() async -> Date? {
+        return await withCheckedContinuation { continuation in
+            getLastImmutableBasalEndDate { date in
+                continuation.resume(returning: date)
             }
         }
     }
@@ -386,14 +364,12 @@ extension InsulinDeliveryStore {
 
             do {
                 let objects = try self.cacheStore.managedObjectContext.fetch(request)
-
                 endDate = objects.first?.endDate
+                self.lastImmutableBasalEndDate = endDate
             } catch let error {
                 self.log.error("Unable to fetch latest insulin delivery objects: %@", String(describing: error))
             }
         }
-
-        self.lastImmutableBasalEndDate = endDate ?? .distantPast
     }
 }
 
@@ -453,7 +429,7 @@ extension InsulinDeliveryStore {
 
                         // If we have a mutable object that matches this sync identifier, then update, it will mark as NOT deleted
                         if let object = mutableObjects.first(where: { $0.provenanceIdentifier == self.provenanceIdentifier && $0.syncIdentifier == entry.syncIdentifier }) {
-                            self.log.debug("Update: %{public}@", String(describing: entry))
+                            self.log.debug("ISD Update: %{public}@", String(describing: entry))
                             object.update(from: entry)
                             return (quantitySample, object)
 
@@ -461,7 +437,7 @@ extension InsulinDeliveryStore {
                         } else {
                             let object = CachedInsulinDeliveryObject(context: self.cacheStore.managedObjectContext)
                             object.create(from: entry, by: self.provenanceIdentifier, at: now)
-                            self.log.debug("Add: %{public}@", String(describing: entry))
+                            self.log.debug("IDS Add: %{public}@", String(describing: entry))
                             return (quantitySample, object)
                         }
                     }
@@ -503,6 +479,14 @@ extension InsulinDeliveryStore {
             self.delegate?.insulinDeliveryStoreHasUpdatedDoseData(self)
 
             completion(.success(()))
+        }
+    }
+
+    func addDoseEntries(_ entries: [DoseEntry], from device: HKDevice?, syncVersion: Int, resolveMutable: Bool = false) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            addDoseEntries(entries, from: device, syncVersion: syncVersion, resolveMutable: resolveMutable) { result in
+                continuation.resume(with: result)
+            }
         }
     }
 
@@ -589,14 +573,14 @@ extension InsulinDeliveryStore {
         dispatchGroup.wait()
 
         if let error = error {
-            self.log.error("Error saving HealthKit objects: %@", String(describing: error))
+            self.log.error("Error saving HealthKit objects: %{public}@", String(describing: error))
             return
         }
 
         // Update Core Data with the changes, log any errors, but do not fail
         sampleObjects.forEach { (sample, object) in object.uuid = sample.uuid }
         if let error = self.cacheStore.save() {
-            self.log.error("Error updating CachedInsulinDeliveryObjects after saving HealthKit objects: %@", String(describing: error))
+            self.log.error("Error updating CachedInsulinDeliveryObjects after saving HealthKit objects: %{public}@", String(describing: error))
             sampleObjects.forEach { (_, object) in object.uuid = nil }
         }
     }
@@ -733,6 +717,18 @@ extension InsulinDeliveryStore {
             completion(doseStoreError)
         }
     }
+
+    public func deleteAllManuallyEnteredDoses(since startDate: Date) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) -> Void in
+            deleteAllManuallyEnteredDoses(since: startDate) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Cache Management
@@ -820,33 +816,26 @@ extension InsulinDeliveryStore {
 
 extension InsulinDeliveryStore {
     /// Generates a diagnostic report about the current state
-    ///
-    /// This operation is performed asynchronously and the completion will be executed on an arbitrary background queue.
-    ///
-    /// - parameter completion: The closure takes a single argument of the report string.
-    public func generateDiagnosticReport(_ completion: @escaping (_ report: String) -> Void) {
-        self.queue.async {
-            var report: [String] = [
-                "### InsulinDeliveryStore",
-                "* cacheLength: \(self.cacheLength)",
-                "* HealthKitSampleStore: \(self.hkSampleStore?.debugDescription ?? "nil")",
-                "* lastImmutableBasalEndDate: \(String(describing: self.lastImmutableBasalEndDate))",
-                "",
-                "#### cachedDoseEntries",
-            ]
+    public func generateDiagnosticReport() async -> String {
+        var report: [String] = [
+            "### InsulinDeliveryStore",
+            "* cacheLength: \(self.cacheLength)",
+            "* HealthKitSampleStore: \(self.hkSampleStore?.debugDescription ?? "nil")",
+            "* lastImmutableBasalEndDate: \(String(describing: self.lastImmutableBasalEndDate))",
+            "",
+            "#### cachedDoseEntries",
+        ]
 
-            switch self.getDoseEntries(start: Date(timeIntervalSinceNow: -.hours(24)), includeMutable: true) {
-            case .failure(let error):
-                report.append("Error: \(error)")
-            case .success(let entries):
-                for entry in entries {
-                    report.append(String(describing: entry))
-                }
+        do {
+            let entries = try await getDoseEntries(start: Date(timeIntervalSinceNow: -.hours(24)), includeMutable: true)
+            for entry in entries {
+                report.append(String(describing: entry))
             }
-
-            report.append("")
-            completion(report.joined(separator: "\n"))
+        } catch {
+            report.append("Error: \(error)")
         }
+        report.append("")
+        return report.joined(separator: "\n")
     }
 }
 

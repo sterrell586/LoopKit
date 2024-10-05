@@ -8,6 +8,7 @@
 
 import HealthKit
 import Foundation
+import LoopAlgorithm
 
 public struct CorrectionRangeOverrides: Equatable {
     public enum Preset: Hashable, CaseIterable {
@@ -109,5 +110,11 @@ extension CorrectionRangeOverrides: RawRepresentable {
         raw["workoutTargetRange"] = workoutTargetGlucoseRange?.rawValue
 
         return raw
+    }
+}
+
+extension ClosedRange<HKQuantity> {
+    public func localizedDescription(unit: HKUnit) -> String {
+        String(format: NSLocalizedString("%.0f - %.0f %3$@", comment: ""), lowerBound.doubleValue(for: unit, withRounding: true), upperBound.doubleValue(for: unit, withRounding: true), unit.unitString)
     }
 }

@@ -8,6 +8,7 @@
 import UIKit
 import SwiftUI
 import LoopKit
+import LoopAlgorithm
 
 public struct PumpManagerDescriptor {
     public let identifier: String
@@ -94,6 +95,7 @@ public protocol PumpManagerOnboardingDelegate: AnyObject {
     func pumpManagerOnboarding(didPauseOnboarding pumpManager: PumpManagerUI)
 }
 
+@MainActor
 public protocol PumpManagerOnboarding {
     /// Delegate to notify about pump manager onboarding.
     var pumpManagerOnboardingDelegate: PumpManagerOnboardingDelegate? { get set }

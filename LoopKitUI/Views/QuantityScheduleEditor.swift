@@ -36,6 +36,7 @@ struct QuantityScheduleEditor<ActionAreaContent: View>: View {
     var savingMechanism: SavingMechanism<DailyQuantitySchedule<Double>>
     var mode: SettingsPresentationMode
     var settingType: TherapySetting
+    var shouldBlockZeroSchedule: Bool
     
     @State private var userDidTap: Bool = false
 
@@ -54,7 +55,7 @@ struct QuantityScheduleEditor<ActionAreaContent: View>: View {
                     unit: unit,
                     guardrail: guardrail,
                     isEditing: isEditing,
-                    isSupportedValue: selectableValues.contains(value.doubleValue(for: unit))
+                    isSupportedValue: selectableValues.contains(value.doubleValue(for: unit, withRounding: true))
                 )
             },
             valuePicker: { item, availableWidth in
@@ -90,7 +91,10 @@ struct QuantityScheduleEditor<ActionAreaContent: View>: View {
             },
             mode: mode,
             therapySettingType: settingType,
-            hasUnsupportedValue: hasUnsupportedValue
+            hasUnsupportedValue: hasUnsupportedValue,
+            shouldBlockZeroSchedule: { scheduleItems in
+                isZeroSchedule(scheduleItems) && shouldBlockZeroSchedule
+            }
         )
         .simultaneousGesture(TapGesture().onEnded {
             withAnimation {
@@ -144,8 +148,12 @@ struct QuantityScheduleEditor<ActionAreaContent: View>: View {
         
     private func hasUnsupportedValue(_ scheduleItems: [RepeatingScheduleValue<HKQuantity>]) -> Bool {
         !scheduleItems.filter { scheduleItem in
-            !selectableValues.contains(scheduleItem.value.doubleValue(for: unit))
+            !selectableValues.contains(scheduleItem.value.doubleValue(for: unit, withRounding: true))
         }.isEmpty
+    }
+    
+    private func isZeroSchedule(_ scheduleItems: [RepeatingScheduleValue<HKQuantity>]) -> Bool {
+        scheduleItems.map({$0.value.doubleValue(for: unit)}).reduce(0, +) == 0
     }
     
     private var crossedThresholds: [SafetyClassification.Threshold] {
@@ -179,7 +187,8 @@ extension QuantityScheduleEditor {
         @ViewBuilder guardrailWarning: @escaping (_ thresholds: [SafetyClassification.Threshold]) -> ActionAreaContent,
         onSave savingMechanism: SavingMechanism<DailyQuantitySchedule<Double>>,
         mode: SettingsPresentationMode = .settings,
-        settingType: TherapySetting = .none
+        settingType: TherapySetting = .none,
+        shouldBlockZeroSchedule: Bool = false
     ) {
         self.title = title
         self.description = description
@@ -196,6 +205,7 @@ extension QuantityScheduleEditor {
         self.savingMechanism = savingMechanism
         self.mode = mode
         self.settingType = settingType
+        self.shouldBlockZeroSchedule = shouldBlockZeroSchedule
     }
 
     init(
@@ -211,7 +221,8 @@ extension QuantityScheduleEditor {
         @ViewBuilder guardrailWarning: @escaping (_ thresholds: [SafetyClassification.Threshold]) -> ActionAreaContent,
         onSave save: @escaping (DailyQuantitySchedule<Double>) -> Void,
         mode: SettingsPresentationMode = .settings,
-        settingType: TherapySetting = .none
+        settingType: TherapySetting = .none,
+        shouldBlockZeroSchedule: Bool = false
     ) {
         let selectableValues = guardrail.allValues(forUnit: unit)
         self.init(
@@ -228,7 +239,8 @@ extension QuantityScheduleEditor {
             guardrailWarning: guardrailWarning,
             onSave: .synchronous(save),
             mode: mode,
-            settingType: settingType
+            settingType: settingType,
+            shouldBlockZeroSchedule: shouldBlockZeroSchedule
         )
     }
 }
