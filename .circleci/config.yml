@@ -6,7 +6,6 @@ version: 2.1
 
 jobs:
   test:
-    working_directory: *project_directory
     resource_class: macos.m1.medium.gen1
     macos:
       xcode: "16.0.0"
