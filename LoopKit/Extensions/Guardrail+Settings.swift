@@ -23,7 +23,7 @@ public extension Guardrail where Value == HKQuantity {
         .min()!
     }
 
-    static let correctionRange = Guardrail(absoluteBounds: (86.1)...(180.5), recommendedBounds: (99.1)...(115.9), unit: .milligramsPerDeciliter, startingSuggestion: 100)
+    static let correctionRange = Guardrail(absoluteBounds: (75.1)...(180.5), recommendedBounds: (99.1)...(115.9), unit: .milligramsPerDeciliter, startingSuggestion: 100)
 
     static func minCorrectionRangeValue(suspendThreshold: GlucoseThreshold?) -> HKQuantity {
         return [
